@@ -10,12 +10,13 @@ var _ = {
     verbose: null,
     isSecure: null,
 
-    pcheck: require ('pcheck'),
-    WebSocketServer: require('ws').Server,
-    express: require ('express'),
     fs: require ('fs'),
     https: require ('https'),
-    key1: require ('go-util').key1,
+    ut: require ('go-util'),
+    key1: null,
+    pcheck: null,
+    WebSocketServer: require('ws').Server,
+    express: require ('express'),
 
     wsConnects: [],
     waitConnectionCount: 0,
@@ -24,6 +25,9 @@ var _ = {
 
 //---------------------
 _.init = () => {
+
+    _.key1 = _.ut.key1;
+    _.pcheck = _.ut.pCheck;
 
     var o = _.pcheck (options, {
         verbose: false,
