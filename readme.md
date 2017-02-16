@@ -85,4 +85,3 @@ go-ws-server/test.js
 ##### 7. Observe msg, "hello, client" in browser
 
 tada!
-
