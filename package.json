@@ -1,0 +1,21 @@
+{
+  "name": "go-ws-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "test.js"
+  },
+  "keywords": [],
+  "author": "T. Greg O'Neil <go22.npm@gmail.com> (http://tgregoneil.com)",
+  "license": "ISC",
+  "readme": "readme.md",
+  "homepage": "https://github.com/tgregoneil/go-ws-server",
+  "repository": {
+    "url": "git+ssh://github.com/tgregoneil/go-ws-server.git",
+    "type": "git"
+  },
+  "bugs": {
+    "url": "https://github.com/tgregoneil/go-ws-server/issues"
+  }
+}
