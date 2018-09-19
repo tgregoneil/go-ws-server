@@ -3,41 +3,66 @@
 module.exports = function (port, agent, options) {
 
 // PRIVATE Properties/Methods
-var _ = {
+var v = {
 
     port: port,
     agent: agent ? agent : null,
-    verbose: null,
     isSecure: null,
 
-    fs: require ('fs'),
-    https: require ('https'),
     ut: require ('go-util'),
+    minsec: require ('minsec').getMinSec,
+    msgShorten0: require ('msgshorten'),
+    msgSh: null,
+
     key1: null,
     pcheck: null,
-    WebSocketServer: require('ws').Server,
-    express: require ('express'),
+
+    //WebSocketServer: require('ws').Server,
+    ws0: require('ws'),
 
     wsConnects: [],
     waitConnectionCount: 0,
 
+    broadcastMode: false,
+    broadcastExclude: {},
+    wsPrimary: -1,
+    broadcastCmds: null,
+    l0CmdOn: null,
+    l0CmdOff: null,
+
+        // for secure connection
+    fs: require ('fs'),
+    express: require ('express'),
+    https: require ('https'),
+
 }; // end PRIVATE properties
+var f={};
 
 //---------------------
-_.init = () => {
+f.init = () => {
 
-    _.key1 = _.ut.key1;
-    _.pcheck = _.ut.pCheck;
+    v.key1 = v.ut.key1;
+    v.pcheck = v.ut.pCheck;
 
-    var o = _.pcheck (options, {
-        verbose: false,
+    v.broadcastExclude = {
+        setUsername: 1,
+        settingsGet: 1,
+        pageInit: 1,
+    };
+
+    //var targetLength = 80800;
+    var targetLength = 200;
+    v.msgSh = new v.msgShorten0 (targetLength);
+//v.msgSh.setKeysOnly (true);
+
+
+    var o = v.pcheck (options, {
         isSecure: false,
         privateKeyFile: "",
         certificateFile: ""
     });
 
-    _.verbose = o.verbose;
-    _.isSecure = o.isSecure;
+    v.isSecure = o.isSecure;
 
     if (!port) {
 
@@ -47,118 +72,146 @@ _.init = () => {
     } // end if (!port)
 
 
-    if (_.isSecure) {
+    if (v.isSecure) {
 
-        var privateKey = _.fs.readFileSync(privateKeyFile, 'utf8');
-        var certificate = _.fs.readFileSync(certificateFile, 'utf8');
+        var privateKey = v.fs.readFileSync(o.privateKeyFile, 'utf8');
+        var certificate = v.fs.readFileSync(o.certificateFile, 'utf8');
     
         var credentials = {key: privateKey, cert: certificate};
-        var app = _.express();
+        var app = v.express();
         
-        var httpsServer = _.https.createServer(credentials, app);
+        var httpsServer = v.https.createServer(credentials, app);
         httpsServer.listen(port);
-        var wss = new _.WebSocketServer ({server: httpsServer});
+
+        //var wss = new v.WebSocketServer ({server: httpsServer});
+        var wss = new v.ws0.Server ({server: httpsServer});
 
     } else {
 
-        var wss = new _.WebSocketServer ({port: port});
+        //var wss = new v.WebSocketServer ({port: port});
+        var wss = new v.ws0.Server ({port: port});
 
-    } // end if (_.isSecure)
+    } // end if (v.isSecure)
     
-    wss.on('connection', _.initConnection); 
+    v.l0CmdOn = JSON.stringify ({l0: 1});
+    v.l0CmdOff = JSON.stringify ({l0: 0});
 
-}; // end _.init
+    wss.on('connection', f.initConnection); 
+
+}; // end f.init
 
 
 //---------------------
-_.doSend = (wsConnect, msg) => {
-    if (_.verbose) {
+f.doSend = (wsId, msgObS) => {
 
-        console.log ('wsServer._.doSend.msg: ' + msg + '\n');
-
-    } // end if (_.verbose)
+        //console.log ('wsServer.f.doSend.msg: ' + msg + '\n');
     
+    var time = v.minsec ();
+
+    var msg = v.msgSh.msgShorten (msgObS);
+    console.log ('<[==== ' + wsId + ' ' + time + ' wsServer.toClient: ' + msg + '\n');
+    var wsConnect = v.wsConnects [wsId];
     
     var ws = wsConnect.ws;
 
     // Wait until the state of the socket is not ready and send the message when it is...
     // per SO:  http://stackoverflow.com/questions/13546424/how-to-wait-for-a-websockets-readystate-to-change
-    _.waitConnectionCount = 0;
-    _.waitSocketConnection(ws, function(){
-        if (_.verbose) {
+    v.waitConnectionCount = 0;
+    f.waitSocketConnection(ws, function(){
 
-            console.log("message sent -- waitConnectionCount: " + _.waitConnectionCount);
+            //console.log("message sent -- waitConnectionCount: " + v.waitConnectionCount);
 
-        } // end if (_.verbose)
+        if (ws.readyState) {
+
+            ws.send(msgObS);
+
+        } else {
+
+            var wsId = wsConnect.wsId;
+            console.log ('client exit wsId: ' + wsId);
+
+        } // end if (ws.readyState)
         
-        ws.send(msg);
     });
 
-}; // end _.doSend 
+}; // end f.doSend 
 
 
 
 //---------------------
-_.initConnection = (ws) => {
-    
-    console.log ('wsServer._.initConnection  new connection wsId: ' + _.wsConnects.length);
-
-    var wsConnect = {ws:ws, agent:_.agent, wsId: _.wsConnects.length};
-
-    _.wsConnects.push (wsConnect);
+f.initConnection = (ws, req) => {
+    console.log ('wsServer.f.initConnection  new connection wsId: ' + v.wsConnects.length);
+    console.log ('req.connection.remoteAddress: ' + req.connection.remoteAddress);
 
     //---------------------
     var fromClient = (msg) => {
-        if (_.verbose) {
 
-            console.log ('fromClient.msg: ' + msg);
-
-        } // end if (_.verbose)
-        
+            //console.log ('fromClient.msg: ' + msg);
     
-        _.inOb (wsConnect, JSON.parse (msg).m);
+        f.inOb (wsConnect, JSON.parse (msg));
     
         return false;
     
-    }; // end _.fromClient 
+    }; // end v.fromClient 
     
 
-    ws.on('message', fromClient);
 
-    ws.on ('close', function () {console.log ('client closed ' + wsConnect.wsId);});
+       // ---- main ----
+    v.serverIp = ws.protocol;
+    console.log ('Server ip: ' + v.serverIp);
 
-    wsConnect.agent (wsConnect.wsId, {initConnection:1});
-
-}; // end _.initConnection 
-
-//---------------------
-_.inOb = (wsConnect, ob) => {
+    var wsConnect = {ws:ws, agent:v.agent, wsId: v.wsConnects.length};
 
     var wsId = wsConnect.wsId;
 
-    if (_.verbose) {
-        
-        console.log ('wsServer._.inOb.ob: ' + JSON.stringify (ob));
-        console.log ('wsServer.inOb.wsId : ' + wsId );
+    v.wsConnects.push (wsConnect);
 
-    } // end if (_.verbose)
+    ws.on('message', fromClient);
+
+    ws.on ('close', function () {
+
+        if (v.broadcastMode && wsId === v.wsPrimary) {
+
+            P.broadcastDisable ();
+
+        } // end if (v.broadcastMode && wsId === v.wsPrimary)
+        
+        console.log ('client closed ' + wsId);
+    });
+
+    var ip = req.connection.remoteAddress.replace (/.*:/, "");
+
+    wsConnect.agent (wsId, {initConnection: ip});
+
+}; // end f.initConnection 
+
+//---------------------
+f.inOb = (wsConnect, ob) => {
+
+        var time = v.minsec ();
+        var wsId = wsConnect.wsId;
+
+        var obShort = v.msgSh.msgShorten (ob);
+        console.log ('\n\n====]> ' + wsId + ' ' + time + ' wsServer.js.inOb.msgOb: ' + obShort);
+
+    var wsId = wsConnect.wsId;
+
+        //console.log ('wsServer.f.inOb.ob: ' + JSON.stringify (ob));
+        //console.log ('wsServer.inOb.wsId : ' + wsId );
     
     wsConnect.agent (wsId, ob);
 
-}; // end _.inOb 
+}; // end f.inOb 
 
 
 //---------------------
-_.waitSocketConnection = (socket, callback) => {
+f.waitSocketConnection = (socket, callback) => {
     
     setTimeout(
         function () {
             if (socket.readyState === 1) {
-                if (_.verbose) {
 
-                    console.log("Connection is made")
-
-                } // end if (_.verbose)
+                    //console.log("Connection is made")
                 
                 if(callback != null){
                     callback();
@@ -166,62 +219,191 @@ _.waitSocketConnection = (socket, callback) => {
                 return;
 
             } else {
-                if (_.verbose) {
 
-                    console.log("wait for connection... waitConnectionCount " + _.waitConnectionCount++)
-
-                } // end if (_.verbose)
+                    //console.log("wait for connection... waitConnectionCount " + v.waitConnectionCount++)
                 
-                if (_.waitConnectionCount < 8) {
+                if (v.waitConnectionCount < 8) {
                     
-                    _.waitSocketConnection(socket, callback);
+                    f.waitSocketConnection(socket, callback);
 
-                } // end if (_.waitConnectionCount < 8)
+                } // end if (v.waitConnectionCount < 8)
                 
             }
 
         }, 5); // wait 5 milisecond for the connection...
 
-}; // end _.waitSocketConnection 
+}; // end f.waitSocketConnection 
 
 
 // PUBLIC Properties/Methods
 var P = {};
 
 //---------------------
-P.toClient = (wsId, msgOb) => {
-        
-    var wsConnect = _.wsConnects [wsId];
-    if (_.verbose) {
-        
-        var toClient = JSON.stringify (msgOb);
-        var maxPrt = 1000;
-
-        var msgL = toClient.length;
-        if (msgL > maxPrt) {
-
-            var maxPrtHalf = maxPrt / 2;
-            var firstHalf = toClient.substr (0, maxPrtHalf - 1);
-            var secondHalf = toClient.substr (msgL - maxPrtHalf, msgL - 1);
-
-            toClient = firstHalf + '   ...   ' + secondHalf;
-
-        } // end if (toClient.length > maxPrt)
-        
-        toClient += '  wsId: ' + wsId;
-        if (_.verbose) {
-
-            console.log ('wsServer.P.toClient.msgOb: ' + toClient + '\n');
-
-        } // end if (_.verbose)
-        
-
-    } // end if (_.verbose)
+P.broadcastDisable = () => {
     
-    var msgObWrap = {m: msgOb};
-    var msgObWrapS = JSON.stringify (msgObWrap);
+    for (var wsId = 0; wsId < v.wsConnects.length; wsId++) {
 
-    _.doSend (wsConnect, msgObWrapS);
+        if (wsId !== v.wsPrimary) {
+
+            f.doSend (wsId, v.l0CmdOff);
+
+        } // end if (wsId !== wsPrimary)
+
+    } // end for (var wsId = 0; wsId < wsConnects.length; wsId++)
+
+    v.broadcastMode = false;
+    v.wsPrimary = -1;
+
+    v.broadcastCmds = null;
+
+}; // end P.broadcastDisable
+
+
+//---------------------
+P.broadcastEnable = (wsPrimary) => {
+    
+    v.broadcastMode = true;
+    v.wsPrimary = wsPrimary;
+
+    v.broadcastCmds = [];
+    
+    for (var wsId = 0; wsId < v.wsConnects.length; wsId++) {
+
+        if (wsId !== wsPrimary) {
+
+            f.doSend (wsId, v.l0CmdOn);
+
+        } // end if (wsId !== wsPrimary)
+
+    } // end for (var wsId = 0; wsId < wsConnects.length; wsId++)
+
+
+}; // end P.broadcastEnable 
+
+
+//---------------------
+P.getServerIp = () => {
+    
+    return v.serverIp;
+
+}; // end P.getServerIp
+
+
+//---------------------
+P.getWsPrimary = () => {
+    
+    return v.wsPrimary;
+
+}; // end P.getWsPrimary
+
+//---------------------
+P.isBroadcastEnabled = () => {
+    
+    return v.wsPrimary !== -1;
+
+}; // end P.isBroadcastEnabled
+
+
+//---------------------
+P.toClient = (wsId, msgOb) => {
+
+    var doBroadcast;
+    if (msgOb.hasOwnProperty ('doBroadcast')) {
+
+        doBroadcast = msgOb.doBroadcast;
+        delete msgOb.doBroadcast;
+
+    } else {
+
+        doBroadcast = v.broadcastMode;
+
+    } // end if (msgOb.hasOwnProperty ('doBroadcast'))
+
+    var sendBroadcastCmds = false;
+    if (msgOb.hasOwnProperty ('sendBroadcastCmds')) {
+
+        sendBroadcastCmds = msgOb.sendBroadcastCmds;
+        delete msgOb.sendBroadcastCmds;
+
+    } // end if (msgOb.hasOwnProperty ('sendBroadcastCmds'))
+    
+
+    if (!msgOb) {
+
+        console.log ('go-ws-server.toClient: !msgOb');
+        return;
+
+    } // end if (!msgOb)
+    
+    var time = v.minsec ();
+
+    doBroadcast = doBroadcast && v.wsPrimary === wsId;
+
+    var msgObA = Array.isArray (msgOb) ? msgOb : [msgOb];
+
+    var msgMain;
+    msgObA.forEach (function (msg) {
+
+        msgMain = v.key1 (msg);
+        doBroadcast = doBroadcast && !v.broadcastExclude [msgMain];
+        if (msgMain === 'initG' && msg.initG.name === 'users') {
+
+            doBroadcast = false;
+
+        } // end if (msgMain === 'initG' && msgObA[0].name === 'users')
+
+        var msgContent = msg [msgMain];
+
+        if (msgContent.hasOwnProperty ('idGCur') && msgContent.idGCur.match (/Start/)) {
+
+            doBroadcast = false;
+
+        } // end if (msgContent.idGCur.match (/Start/))
+        
+    });
+
+    var msgObS = JSON.stringify (msgOb);
+
+    if (msgMain !== 'kyb' && msgMain !== 'st') {
+        // kyb and st are only sent from user 'rrr', and therefore do not need to be sent back to 'rrr'
+
+         f.doSend (wsId, msgObS);
+
+         /* causes a delay returning command to give time to test if key/click interaction in client is disabled
+        setTimeout (function () {
+            
+            f.doSend (wsId, msgObS);
+
+        }, 3000);
+         */
+
+    } // end if (msgMain !== 'kyb')
+    
+    if (doBroadcast) {
+
+        v.broadcastCmds.push (msgObS);
+
+        var wsConnectsLength = v.wsConnects.length
+        for (let wsIdb = 0; wsIdb < wsConnectsLength; wsIdb++) {
+
+            if (wsIdb !== wsId) {
+
+                f.doSend (wsIdb, msgObS);
+
+            } // end if (wsIdb !== wsId)
+
+        } // end for (var i = 0; i < wsConnectsLength; i++)
+        
+    } else if (sendBroadcastCmds) {
+        
+        f.doSend (wsId, v.l0CmdOn);
+        v.broadcastCmds.forEach (function (cmdObS) {
+
+            f.doSend (wsId, cmdObS);
+        });
+
+    } // end if (doBroadcast)
+    
     
     return;
 
@@ -229,7 +411,7 @@ P.toClient = (wsId, msgOb) => {
 
 // end PUBLIC section
 
-_.init();
+f.init();
 return P;
 
 };

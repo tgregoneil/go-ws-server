@@ -1,6 +1,6 @@
 {
   "name": "go-ws-server",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Websocket based server for go-ws-client",
   "main": "index.js",
   "scripts": {
